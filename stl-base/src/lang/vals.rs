@@ -14,7 +14,7 @@ enum SimpleVal {
 
 pub enum ExpValError<V: ExpVal> {
     NumValExpected { actual: Rc<V> },
-    BoolVaLExpected { actual: Rc<V> },
+    BoolValExpected { actual: Rc<V> },
 }
 
 impl<V: ExpVal> Display for ExpValError<V> {
@@ -23,7 +23,7 @@ impl<V: ExpVal> Display for ExpValError<V> {
             ExpValError::NumValExpected { actual } => {
                 write!(f, "expected number, found: {}", actual)
             }
-            ExpValError::BoolVaLExpected { actual } => {
+            ExpValError::BoolValExpected { actual } => {
                 write!(f, "expected boolean, found: {}", actual)
             }
         }
@@ -46,7 +46,7 @@ pub fn bool_val(b: bool) -> Rc<impl ExpVal> {
     Rc::new(SimpleVal::BoolVal(b))
 }
 
-pub trait ExpVal: Debug + Display {
+pub trait ExpVal: Debug + Display + Sized {
     fn to_num(&self) -> Result<i32, ExpValError<Self>>;
     fn to_bool(&self) -> Result<bool, ExpValError<Self>>;
 
@@ -58,15 +58,15 @@ impl ExpVal for SimpleVal {
         match self {
             SimpleVal::NumVal(n) => Ok(*n),
             SimpleVal::BoolVal(_) => Err(ExpValError::NumValExpected {
-                actual: self.clone(),
+                actual: Rc::new(self.clone()),
             }),
         }
     }
 
     fn to_bool(&self) -> Result<bool, ExpValError<Self>> {
         match self {
-            SimpleVal::NumVal(_) => Err(ExpValError::BoolVaLExpected {
-                actual: self.clone(),
+            SimpleVal::NumVal(_) => Err(ExpValError::BoolValExpected {
+                actual: Rc::new(self.clone()),
             }),
             SimpleVal::BoolVal(b) => Ok(*b),
         }
@@ -81,7 +81,6 @@ impl ExpVal for SimpleVal {
 }
 
 #[cfg(test)]
-
 mod test {
 
     use super::*;
