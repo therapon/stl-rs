@@ -62,6 +62,7 @@ impl Parser {
             TokenKind::Ident(var) => self.parse_var_or_call(var),
             TokenKind::Plus => self.parse_var_or_call("+"),
             TokenKind::Minus => self.parse_var_or_call("-"),
+            TokenKind::Equals => self.parse_var_or_call("="),
             TokenKind::Not => self.parse_var_or_call("not"),
             TokenKind::Or => self.parse_call(Expr::OrExp),
             TokenKind::Cond => self.parse_cond(token.span),
@@ -380,6 +381,14 @@ mod test {
                 Expr::BoolExp(true),
                 call(var("not"), vec![Expr::BoolExp(false)])
             ]))
+        );
+    }
+
+    #[test]
+    fn parse_equality_call() {
+        assert_eq!(
+            parse("=(1 2)").unwrap(),
+            Program::new(call(var("="), vec![Expr::ConstExp(1), Expr::ConstExp(2)]))
         );
     }
 

@@ -24,6 +24,7 @@ pub enum ProcVal {
 pub enum PrimitiveProc {
     Add,
     Sub,
+    Eq,
     Not,
 }
 

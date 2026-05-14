@@ -1,5 +1,6 @@
 mod lang;
+mod repl;
 
-fn main() {
-    println!("Hello, world!");
+fn main() -> miette::Result<()> {
+    repl::run()
 }

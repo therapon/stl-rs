@@ -24,6 +24,9 @@ pub enum EvalError {
         actual: usize,
     },
 
+    #[error("cannot compare {left} and {right} with =")]
+    EqualityNotSupported { left: ExpVal, right: ExpVal },
+
     #[error("no cond clause matched")]
     NoCondClauseMatched,
 }
@@ -41,9 +44,7 @@ impl Default for Evaluator {
 
 impl Evaluator {
     pub fn new() -> Self {
-        Self {
-            initial_env: Self::initial_env(),
-        }
+        Self::with_initial_env(Self::initial_env())
     }
 
     pub fn with_initial_env(initial_env: Rc<Env>) -> Self {
@@ -62,6 +63,7 @@ impl Evaluator {
         Env::empty()
             .extend("+", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Add)))
             .extend("-", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Sub)))
+            .extend("=", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Eq)))
             .extend("not", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Not)))
     }
 
@@ -133,6 +135,7 @@ impl Evaluator {
         match primitive {
             PrimitiveProc::Add => self.eval_add(args),
             PrimitiveProc::Sub => self.eval_sub(args),
+            PrimitiveProc::Eq => self.eval_eq(args),
             PrimitiveProc::Not => self.eval_not(args),
         }
     }
@@ -163,6 +166,25 @@ impl Evaluator {
             .try_fold(first, |acc, n| -> Result<i64, EvalError> { Ok(acc - n?) })?;
 
         Ok(ExpVal::num(difference))
+    }
+
+    fn eval_eq(&self, args: &[ExpVal]) -> Result<ExpVal, EvalError> {
+        if args.len() != 2 {
+            return Err(EvalError::WrongArity {
+                op: "=",
+                expected: 2,
+                actual: args.len(),
+            });
+        }
+
+        match (&args[0], &args[1]) {
+            (ExpVal::NumVal(left), ExpVal::NumVal(right)) => Ok(ExpVal::boolean(left == right)),
+            (ExpVal::BoolVal(left), ExpVal::BoolVal(right)) => Ok(ExpVal::boolean(left == right)),
+            (left, right) => Err(EvalError::EqualityNotSupported {
+                left: left.clone(),
+                right: right.clone(),
+            }),
+        }
     }
 
     fn eval_not(&self, args: &[ExpVal]) -> Result<ExpVal, EvalError> {
@@ -288,6 +310,37 @@ mod test {
                 op: "not",
                 expected: 1,
                 actual: 2
+            }
+        );
+    }
+
+    #[test]
+    fn eval_equality_compares_numbers_and_booleans() {
+        assert_eq!(eval("=(1 1)").unwrap(), ExpVal::boolean(true));
+        assert_eq!(eval("=(1 2)").unwrap(), ExpVal::boolean(false));
+        assert_eq!(eval("=(true true)").unwrap(), ExpVal::boolean(true));
+        assert_eq!(eval("=(true false)").unwrap(), ExpVal::boolean(false));
+    }
+
+    #[test]
+    fn eval_equality_rejects_wrong_arity() {
+        assert_eq!(
+            eval("=(1)").unwrap_err(),
+            EvalError::WrongArity {
+                op: "=",
+                expected: 2,
+                actual: 1
+            }
+        );
+    }
+
+    #[test]
+    fn eval_equality_rejects_unsupported_values() {
+        assert_eq!(
+            eval("=(1 true)").unwrap_err(),
+            EvalError::EqualityNotSupported {
+                left: ExpVal::num(1),
+                right: ExpVal::boolean(true)
             }
         );
     }
