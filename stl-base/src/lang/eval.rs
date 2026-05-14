@@ -1,12 +1,9 @@
 use std::rc::Rc;
 
 use crate::lang::{
-    ast::{CondClause, Expr, LetBinding, Program},
+    ast::{CondClause, Expr, LetBinding, LetRecBinding, Program},
     envs::{Env, EnvError},
-    vals::{
-        ExpVal, ExpValError, PrimitiveProc, ProcVal, bool_val, expval_to_bool, expval_to_num,
-        expval_to_proc, num_val, proc_val,
-    },
+    vals::{ExpVal, ExpValError, PrimitiveProc, ProcVal},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -31,176 +28,237 @@ pub enum EvalError {
     NoCondClauseMatched,
 }
 
-pub fn value_of_program(program: &Program) -> Result<ExpVal, EvalError> {
-    value_of(&program.body, initial_env())
+#[derive(Clone, Debug)]
+pub struct Evaluator {
+    initial_env: Rc<Env>,
 }
 
-pub fn value_of(expr: &Expr, env: Rc<Env>) -> Result<ExpVal, EvalError> {
-    match expr {
-        Expr::ConstExp(n) => Ok(num_val(*n)),
-        Expr::BoolExp(b) => Ok(bool_val(*b)),
-        Expr::VarExp(var) => Ok(env.apply(var)?),
-        Expr::FnExp { params, body } => Ok(proc_val(ProcVal::UserDefined {
-            params: params.clone(),
-            body: *body.clone(),
-            saved_env: env,
-        })),
-        Expr::CallExp { operator, operands } => eval_call(operator, operands, env),
-        Expr::OrExp(args) => eval_or(args, env),
-        Expr::CondExp(clauses) => eval_cond(clauses, env),
-        Expr::LetExp { bindings, body } => eval_let(bindings, body, env),
+impl Default for Evaluator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-fn initial_env() -> Rc<Env> {
-    Env::empty()
-        .extend("+", proc_val(ProcVal::Primitive(PrimitiveProc::Add)))
-        .extend("-", proc_val(ProcVal::Primitive(PrimitiveProc::Sub)))
-        .extend("not", proc_val(ProcVal::Primitive(PrimitiveProc::Not)))
-}
+impl Evaluator {
+    pub fn new() -> Self {
+        Self {
+            initial_env: Self::initial_env(),
+        }
+    }
 
-fn eval_call(operator: &Expr, operands: &[Expr], env: Rc<Env>) -> Result<ExpVal, EvalError> {
-    let proc = expval_to_proc(&value_of(operator, env.clone())?)?;
-    let args = operands
-        .iter()
-        .map(|operand| value_of(operand, env.clone()))
-        .collect::<Result<Vec<_>, _>>()?;
+    pub fn with_initial_env(initial_env: Rc<Env>) -> Self {
+        Self { initial_env }
+    }
 
-    apply_procedure(&proc, args)
-}
+    pub fn eval_program(&self, program: &Program) -> Result<ExpVal, EvalError> {
+        self.eval_expr(&program.body)
+    }
 
-fn apply_procedure(proc: &ProcVal, args: Vec<ExpVal>) -> Result<ExpVal, EvalError> {
-    match proc {
-        ProcVal::UserDefined {
-            params,
-            body,
-            saved_env,
-        } => {
-            if params.len() != args.len() {
-                return Err(EvalError::WrongArity {
-                    op: "function",
-                    expected: params.len(),
-                    actual: args.len(),
-                });
+    pub fn eval_expr(&self, expr: &Expr) -> Result<ExpVal, EvalError> {
+        self.eval_expr_in_env(expr, self.initial_env.clone())
+    }
+
+    fn initial_env() -> Rc<Env> {
+        Env::empty()
+            .extend("+", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Add)))
+            .extend("-", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Sub)))
+            .extend("not", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Not)))
+    }
+
+    fn eval_expr_in_env(&self, expr: &Expr, env: Rc<Env>) -> Result<ExpVal, EvalError> {
+        match expr {
+            Expr::ConstExp(n) => Ok(ExpVal::num(*n)),
+            Expr::BoolExp(b) => Ok(ExpVal::boolean(*b)),
+            Expr::VarExp(var) => Ok(env.apply(var)?),
+            Expr::FnExp { params, body } => Ok(ExpVal::proc(ProcVal::UserDefined {
+                params: params.clone(),
+                body: *body.clone(),
+                saved_env: env,
+            })),
+            Expr::CallExp { operator, operands } => self.eval_call(operator, operands, env),
+            Expr::OrExp(args) => self.eval_or(args, env),
+            Expr::CondExp(clauses) => self.eval_cond(clauses, env),
+            Expr::LetExp { bindings, body } => self.eval_let(bindings, body, env),
+            Expr::LetRecExp { bindings, body } => self.eval_letrec(bindings, body, env),
+        }
+    }
+
+    fn eval_call(
+        &self,
+        operator: &Expr,
+        operands: &[Expr],
+        env: Rc<Env>,
+    ) -> Result<ExpVal, EvalError> {
+        let proc = self.eval_expr_in_env(operator, env.clone())?.as_proc()?;
+        let args = operands
+            .iter()
+            .map(|operand| self.eval_expr_in_env(operand, env.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.apply_procedure(&proc, args)
+    }
+
+    fn apply_procedure(&self, proc: &ProcVal, args: Vec<ExpVal>) -> Result<ExpVal, EvalError> {
+        match proc {
+            ProcVal::UserDefined {
+                params,
+                body,
+                saved_env,
+            } => {
+                if params.len() != args.len() {
+                    return Err(EvalError::WrongArity {
+                        op: "function",
+                        expected: params.len(),
+                        actual: args.len(),
+                    });
+                }
+
+                let mut call_env = saved_env.clone();
+
+                for (param, arg) in params.iter().zip(args) {
+                    call_env = call_env.extend(param.clone(), arg);
+                }
+
+                self.eval_expr_in_env(body, call_env)
             }
+            ProcVal::Primitive(primitive) => self.apply_primitive(primitive, &args),
+        }
+    }
 
-            let mut call_env = saved_env.clone();
+    fn apply_primitive(
+        &self,
+        primitive: &PrimitiveProc,
+        args: &[ExpVal],
+    ) -> Result<ExpVal, EvalError> {
+        match primitive {
+            PrimitiveProc::Add => self.eval_add(args),
+            PrimitiveProc::Sub => self.eval_sub(args),
+            PrimitiveProc::Not => self.eval_not(args),
+        }
+    }
 
-            for (param, arg) in params.iter().zip(args) {
-                call_env = call_env.extend(param.clone(), arg);
+    fn eval_add(&self, args: &[ExpVal]) -> Result<ExpVal, EvalError> {
+        let sum = args
+            .iter()
+            .map(ExpVal::as_num)
+            .try_fold(0, |acc, n| -> Result<i64, EvalError> { Ok(acc + n?) })?;
+
+        Ok(ExpVal::num(sum))
+    }
+
+    fn eval_sub(&self, args: &[ExpVal]) -> Result<ExpVal, EvalError> {
+        let Some((first, rest)) = args.split_first() else {
+            return Err(EvalError::EmptyArgs { op: "-" });
+        };
+
+        let first = first.as_num()?;
+
+        if rest.is_empty() {
+            return Ok(ExpVal::num(-first));
+        }
+
+        let difference = rest
+            .iter()
+            .map(ExpVal::as_num)
+            .try_fold(first, |acc, n| -> Result<i64, EvalError> { Ok(acc - n?) })?;
+
+        Ok(ExpVal::num(difference))
+    }
+
+    fn eval_not(&self, args: &[ExpVal]) -> Result<ExpVal, EvalError> {
+        if args.len() != 1 {
+            return Err(EvalError::WrongArity {
+                op: "not",
+                expected: 1,
+                actual: args.len(),
+            });
+        }
+
+        Ok(ExpVal::boolean(!args[0].as_bool()?))
+    }
+
+    fn eval_or(&self, args: &[Expr], env: Rc<Env>) -> Result<ExpVal, EvalError> {
+        for arg in args {
+            if self.eval_expr_as_bool(arg, env.clone())? {
+                return Ok(ExpVal::boolean(true));
             }
-
-            value_of(body, call_env)
         }
-        ProcVal::Primitive(primitive) => apply_primitive(primitive, &args),
-    }
-}
 
-fn apply_primitive(primitive: &PrimitiveProc, args: &[ExpVal]) -> Result<ExpVal, EvalError> {
-    match primitive {
-        PrimitiveProc::Add => eval_add(args),
-        PrimitiveProc::Sub => eval_sub(args),
-        PrimitiveProc::Not => eval_not(args),
-    }
-}
-
-fn eval_add(args: &[ExpVal]) -> Result<ExpVal, EvalError> {
-    let sum = args
-        .iter()
-        .map(expval_to_num)
-        .try_fold(0, |acc, n| -> Result<i64, EvalError> { Ok(acc + n?) })?;
-
-    Ok(num_val(sum))
-}
-
-fn eval_sub(args: &[ExpVal]) -> Result<ExpVal, EvalError> {
-    let Some((first, rest)) = args.split_first() else {
-        return Err(EvalError::EmptyArgs { op: "-" });
-    };
-
-    let first = expval_to_num(first)?;
-
-    if rest.is_empty() {
-        return Ok(num_val(-first));
+        Ok(ExpVal::boolean(false))
     }
 
-    let difference = rest
-        .iter()
-        .map(expval_to_num)
-        .try_fold(first, |acc, n| -> Result<i64, EvalError> { Ok(acc - n?) })?;
-
-    Ok(num_val(difference))
-}
-
-fn eval_not(args: &[ExpVal]) -> Result<ExpVal, EvalError> {
-    if args.len() != 1 {
-        return Err(EvalError::WrongArity {
-            op: "not",
-            expected: 1,
-            actual: args.len(),
-        });
-    }
-
-    Ok(bool_val(!expval_to_bool(&args[0])?))
-}
-
-fn eval_or(args: &[Expr], env: Rc<Env>) -> Result<ExpVal, EvalError> {
-    for arg in args {
-        if value_of_expr_as_bool(arg, env.clone())? {
-            return Ok(bool_val(true));
+    fn eval_cond(&self, clauses: &[CondClause], env: Rc<Env>) -> Result<ExpVal, EvalError> {
+        for clause in clauses {
+            if self.eval_expr_as_bool(&clause.condition, env.clone())? {
+                return self.eval_expr_in_env(&clause.result, env);
+            }
         }
+
+        Err(EvalError::NoCondClauseMatched)
     }
 
-    Ok(bool_val(false))
-}
+    fn eval_let(
+        &self,
+        bindings: &[LetBinding],
+        body: &Expr,
+        env: Rc<Env>,
+    ) -> Result<ExpVal, EvalError> {
+        let mut extended_env = env.clone();
 
-fn eval_cond(clauses: &[CondClause], env: Rc<Env>) -> Result<ExpVal, EvalError> {
-    for clause in clauses {
-        if value_of_expr_as_bool(&clause.condition, env.clone())? {
-            return value_of(&clause.result, env);
+        for binding in bindings {
+            let val = self.eval_expr_in_env(&binding.expr, env.clone())?;
+            extended_env = extended_env.extend(binding.var.clone(), val);
         }
+
+        self.eval_expr_in_env(body, extended_env)
     }
 
-    Err(EvalError::NoCondClauseMatched)
-}
-
-fn eval_let(bindings: &[LetBinding], body: &Expr, env: Rc<Env>) -> Result<ExpVal, EvalError> {
-    let mut extended_env = env.clone();
-
-    for binding in bindings {
-        let val = value_of(&binding.expr, env.clone())?;
-        extended_env = extended_env.extend(binding.var.clone(), val);
+    fn eval_letrec(
+        &self,
+        bindings: &[LetRecBinding],
+        body: &Expr,
+        env: Rc<Env>,
+    ) -> Result<ExpVal, EvalError> {
+        self.eval_expr_in_env(body, env.extend_rec(bindings.to_vec()))
     }
 
-    value_of(body, extended_env)
-}
-
-fn value_of_expr_as_bool(expr: &Expr, env: Rc<Env>) -> Result<bool, EvalError> {
-    let val = value_of(expr, env)?;
-    Ok(expval_to_bool(&val)?)
+    fn eval_expr_as_bool(&self, expr: &Expr, env: Rc<Env>) -> Result<bool, EvalError> {
+        let val = self.eval_expr_in_env(expr, env)?;
+        Ok(val.as_bool()?)
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::lang::{parser::parse, vals::ExpValError};
+    use crate::lang::{envs::Env, parser::parse, vals::ExpValError};
 
     fn eval(input: &str) -> Result<ExpVal, EvalError> {
-        value_of_program(&parse(input).unwrap())
+        Evaluator::new().eval_program(&parse(input).unwrap())
+    }
+
+    #[test]
+    fn evaluator_accepts_custom_initial_environment() {
+        let evaluator = Evaluator::with_initial_env(Env::empty().extend("x", ExpVal::num(5)));
+
+        assert_eq!(
+            evaluator.eval_program(&parse("x").unwrap()).unwrap(),
+            ExpVal::num(5)
+        );
     }
 
     #[test]
     fn eval_adds_zero_or_more_numbers() {
-        assert_eq!(eval("+()").unwrap(), num_val(0));
-        assert_eq!(eval("+(1)").unwrap(), num_val(1));
-        assert_eq!(eval("+(1 2 3)").unwrap(), num_val(6));
+        assert_eq!(eval("+()").unwrap(), ExpVal::num(0));
+        assert_eq!(eval("+(1)").unwrap(), ExpVal::num(1));
+        assert_eq!(eval("+(1 2 3)").unwrap(), ExpVal::num(6));
     }
 
     #[test]
     fn eval_subtracts_like_lisp() {
-        assert_eq!(eval("-(10)").unwrap(), num_val(-10));
-        assert_eq!(eval("-(10 3)").unwrap(), num_val(7));
-        assert_eq!(eval("-(10 3 2)").unwrap(), num_val(5));
+        assert_eq!(eval("-(10)").unwrap(), ExpVal::num(-10));
+        assert_eq!(eval("-(10 3)").unwrap(), ExpVal::num(7));
+        assert_eq!(eval("-(10 3 2)").unwrap(), ExpVal::num(5));
     }
 
     #[test]
@@ -210,16 +268,16 @@ mod test {
 
     #[test]
     fn eval_or_short_circuits() {
-        assert_eq!(eval("or()").unwrap(), bool_val(false));
-        assert_eq!(eval("or(false false)").unwrap(), bool_val(false));
-        assert_eq!(eval("or(false true)").unwrap(), bool_val(true));
-        assert_eq!(eval("or(true +(1 true))").unwrap(), bool_val(true));
+        assert_eq!(eval("or()").unwrap(), ExpVal::boolean(false));
+        assert_eq!(eval("or(false false)").unwrap(), ExpVal::boolean(false));
+        assert_eq!(eval("or(false true)").unwrap(), ExpVal::boolean(true));
+        assert_eq!(eval("or(true +(1 true))").unwrap(), ExpVal::boolean(true));
     }
 
     #[test]
     fn eval_not_negates_boolean() {
-        assert_eq!(eval("not(true)").unwrap(), bool_val(false));
-        assert_eq!(eval("not(false)").unwrap(), bool_val(true));
+        assert_eq!(eval("not(true)").unwrap(), ExpVal::boolean(false));
+        assert_eq!(eval("not(false)").unwrap(), ExpVal::boolean(true));
     }
 
     #[test]
@@ -236,14 +294,14 @@ mod test {
 
     #[test]
     fn eval_primitive_procs_are_initial_bindings() {
-        assert_eq!(eval("let (add = +) add(1 2)").unwrap(), num_val(3));
+        assert_eq!(eval("let (add = +) add(1 2)").unwrap(), ExpVal::num(3));
     }
 
     #[test]
     fn eval_function_expression_as_closure() {
         assert_eq!(
             eval("let (add1 = fn(x) +(x 1)) add1(41)").unwrap(),
-            num_val(42)
+            ExpVal::num(42)
         );
     }
 
@@ -256,7 +314,7 @@ mod test {
                         let (x = 100) addx(1)"
             )
             .unwrap(),
-            num_val(11)
+            ExpVal::num(11)
         );
     }
 
@@ -276,7 +334,49 @@ mod test {
     fn eval_call_rejects_non_procedures() {
         assert_eq!(
             eval("let (x = 1) x(2)").unwrap_err(),
-            EvalError::ExpVal(ExpValError::ProcValExpected { actual: num_val(1) })
+            EvalError::ExpVal(ExpValError::ProcValExpected {
+                actual: ExpVal::num(1)
+            })
+        );
+    }
+
+    #[test]
+    fn eval_letrec_binds_recursive_function() {
+        assert_eq!(
+            eval(
+                "letrec (
+                    f = fn(x) +(x 1)
+                ) f(41)"
+            )
+            .unwrap(),
+            ExpVal::num(42)
+        );
+    }
+
+    #[test]
+    fn eval_letrec_function_can_look_up_itself_late() {
+        assert_eq!(
+            eval(
+                "letrec (
+                    f = fn(x) let (self = f) x
+                ) f(41)"
+            )
+            .unwrap(),
+            ExpVal::num(41)
+        );
+    }
+
+    #[test]
+    fn eval_letrec_supports_mutual_function_lookup() {
+        assert_eq!(
+            eval(
+                "letrec (
+                    f = fn(x) g(x)
+                    g = fn(y) +(y 1)
+                ) f(41)"
+            )
+            .unwrap(),
+            ExpVal::num(42)
         );
     }
 
@@ -291,7 +391,7 @@ mod test {
                 )"
             )
             .unwrap(),
-            num_val(5)
+            ExpVal::num(5)
         );
     }
 
@@ -305,7 +405,7 @@ mod test {
                 ) +(x y)"
             )
             .unwrap(),
-            num_val(6)
+            ExpVal::num(6)
         );
     }
 
@@ -320,7 +420,7 @@ mod test {
                     ) y"
             )
             .unwrap(),
-            num_val(1)
+            ExpVal::num(1)
         );
     }
 
@@ -332,7 +432,7 @@ mod test {
                     let (x = 2) x"
             )
             .unwrap(),
-            num_val(2)
+            ExpVal::num(2)
         );
     }
 
@@ -349,7 +449,7 @@ mod test {
         assert_eq!(
             eval("+(1 true)").unwrap_err(),
             EvalError::ExpVal(ExpValError::NumValExpected {
-                actual: bool_val(true)
+                actual: ExpVal::boolean(true)
             })
         );
     }

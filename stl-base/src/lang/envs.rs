@@ -1,6 +1,9 @@
 use std::rc::Rc;
 
-use crate::lang::vals::ExpVal;
+use crate::lang::{
+    ast::LetRecBinding,
+    vals::{ExpVal, ProcVal},
+};
 
 pub type Symbol = String;
 
@@ -10,6 +13,10 @@ pub enum Env {
     ExtendEnv {
         var: Symbol,
         val: ExpVal,
+        outer: Rc<Env>,
+    },
+    ExtendRecEnv {
+        bindings: Vec<LetRecBinding>,
         outer: Rc<Env>,
     },
 }
@@ -33,6 +40,13 @@ impl Env {
         })
     }
 
+    pub fn extend_rec(self: Rc<Self>, bindings: Vec<LetRecBinding>) -> Rc<Self> {
+        Rc::new(Self::ExtendRecEnv {
+            bindings,
+            outer: self,
+        })
+    }
+
     pub fn apply(&self, search_var: &str) -> Result<ExpVal, EnvError> {
         match self {
             Self::EmptyEnv => Err(EnvError::UnboundVariable {
@@ -45,6 +59,17 @@ impl Env {
                     outer.apply(search_var)
                 }
             }
+            Self::ExtendRecEnv { bindings, outer } => {
+                if let Some(binding) = bindings.iter().find(|binding| binding.name == search_var) {
+                    Ok(ExpVal::proc(ProcVal::UserDefined {
+                        params: binding.params.clone(),
+                        body: binding.body.clone(),
+                        saved_env: Rc::new(self.clone()),
+                    }))
+                } else {
+                    outer.apply(search_var)
+                }
+            }
         }
     }
 }
@@ -52,7 +77,6 @@ impl Env {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::lang::vals::{bool_val, num_val};
 
     #[test]
     fn empty_env_has_no_bindings() {
@@ -67,19 +91,33 @@ mod test {
     #[test]
     fn apply_env_finds_nearest_binding() {
         let env = Env::empty()
-            .extend("x", num_val(10))
-            .extend("x", bool_val(true));
+            .extend("x", ExpVal::num(10))
+            .extend("x", ExpVal::boolean(true));
 
-        assert_eq!(env.apply("x").unwrap(), bool_val(true));
+        assert_eq!(env.apply("x").unwrap(), ExpVal::boolean(true));
     }
 
     #[test]
     fn apply_env_searches_saved_environment() {
         let env = Env::empty()
-            .extend("x", num_val(10))
-            .extend("y", bool_val(false));
+            .extend("x", ExpVal::num(10))
+            .extend("y", ExpVal::boolean(false));
 
-        assert_eq!(env.apply("x").unwrap(), num_val(10));
-        assert_eq!(env.apply("y").unwrap(), bool_val(false));
+        assert_eq!(env.apply("x").unwrap(), ExpVal::num(10));
+        assert_eq!(env.apply("y").unwrap(), ExpVal::boolean(false));
+    }
+
+    #[test]
+    fn apply_env_builds_late_bound_recursive_proc() {
+        let env = Env::empty().extend_rec(vec![LetRecBinding::new(
+            "f",
+            vec!["x".to_string()],
+            crate::lang::ast::Expr::VarExp("x".to_string()),
+        )]);
+
+        assert!(matches!(
+            env.apply("f").unwrap(),
+            ExpVal::ProcVal(ProcVal::UserDefined { .. })
+        ));
     }
 }

@@ -28,6 +28,10 @@ pub enum Expr {
         bindings: Vec<LetBinding>,
         body: Box<Expr>,
     },
+    LetRecExp {
+        bindings: Vec<LetRecBinding>,
+        body: Box<Expr>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,6 +57,23 @@ impl LetBinding {
         Self {
             var: var.into(),
             expr,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LetRecBinding {
+    pub name: String,
+    pub params: Vec<String>,
+    pub body: Expr,
+}
+
+impl LetRecBinding {
+    pub fn new(name: impl Into<String>, params: Vec<String>, body: Expr) -> Self {
+        Self {
+            name: name.into(),
+            params,
+            body,
         }
     }
 }

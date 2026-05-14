@@ -25,6 +25,9 @@ pub enum TokenKind {
     #[token("=")]
     Equals,
 
+    #[token("letrec")]
+    LetRec,
+
     #[token("let")]
     Let,
 
@@ -201,6 +204,73 @@ mod test {
                 Token {
                     kind: TokenKind::Ident("x".to_string()),
                     span: 12..13
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_letrec_tokens() {
+        let tokens = scan("letrec (f = fn(x) x) f(1)").unwrap();
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token {
+                    kind: TokenKind::LetRec,
+                    span: 0..6
+                },
+                Token {
+                    kind: TokenKind::LParen,
+                    span: 7..8
+                },
+                Token {
+                    kind: TokenKind::Ident("f".to_string()),
+                    span: 8..9
+                },
+                Token {
+                    kind: TokenKind::Equals,
+                    span: 10..11
+                },
+                Token {
+                    kind: TokenKind::Fn,
+                    span: 12..14
+                },
+                Token {
+                    kind: TokenKind::LParen,
+                    span: 14..15
+                },
+                Token {
+                    kind: TokenKind::Ident("x".to_string()),
+                    span: 15..16
+                },
+                Token {
+                    kind: TokenKind::RParen,
+                    span: 16..17
+                },
+                Token {
+                    kind: TokenKind::Ident("x".to_string()),
+                    span: 18..19
+                },
+                Token {
+                    kind: TokenKind::RParen,
+                    span: 19..20
+                },
+                Token {
+                    kind: TokenKind::Ident("f".to_string()),
+                    span: 21..22
+                },
+                Token {
+                    kind: TokenKind::LParen,
+                    span: 22..23
+                },
+                Token {
+                    kind: TokenKind::Int(1),
+                    span: 23..24
+                },
+                Token {
+                    kind: TokenKind::RParen,
+                    span: 24..25
                 },
             ]
         );

@@ -49,42 +49,44 @@ pub enum ExpValError {
     ProcValExpected { actual: ExpVal },
 }
 
-pub fn num_val(n: i64) -> ExpVal {
-    ExpVal::NumVal(n)
-}
-
-pub fn bool_val(b: bool) -> ExpVal {
-    ExpVal::BoolVal(b)
-}
-
-pub fn proc_val(proc: ProcVal) -> ExpVal {
-    ExpVal::ProcVal(proc)
-}
-
-pub fn expval_to_num(val: &ExpVal) -> Result<i64, ExpValError> {
-    match val {
-        ExpVal::NumVal(n) => Ok(*n),
-        _ => Err(ExpValError::NumValExpected {
-            actual: val.clone(),
-        }),
+impl ExpVal {
+    pub fn num(n: i64) -> Self {
+        Self::NumVal(n)
     }
-}
 
-pub fn expval_to_bool(val: &ExpVal) -> Result<bool, ExpValError> {
-    match val {
-        ExpVal::BoolVal(b) => Ok(*b),
-        _ => Err(ExpValError::BoolValExpected {
-            actual: val.clone(),
-        }),
+    pub fn boolean(b: bool) -> Self {
+        Self::BoolVal(b)
     }
-}
 
-pub fn expval_to_proc(val: &ExpVal) -> Result<ProcVal, ExpValError> {
-    match val {
-        ExpVal::ProcVal(proc) => Ok(proc.clone()),
-        _ => Err(ExpValError::ProcValExpected {
-            actual: val.clone(),
-        }),
+    pub fn proc(proc: ProcVal) -> Self {
+        Self::ProcVal(proc)
+    }
+
+    pub fn as_num(&self) -> Result<i64, ExpValError> {
+        match self {
+            Self::NumVal(n) => Ok(*n),
+            _ => Err(ExpValError::NumValExpected {
+                actual: self.clone(),
+            }),
+        }
+    }
+
+    pub fn as_bool(&self) -> Result<bool, ExpValError> {
+        match self {
+            Self::BoolVal(b) => Ok(*b),
+            _ => Err(ExpValError::BoolValExpected {
+                actual: self.clone(),
+            }),
+        }
+    }
+
+    pub fn as_proc(&self) -> Result<ProcVal, ExpValError> {
+        match self {
+            Self::ProcVal(proc) => Ok(proc.clone()),
+            _ => Err(ExpValError::ProcValExpected {
+                actual: self.clone(),
+            }),
+        }
     }
 }
 
@@ -93,21 +95,21 @@ mod test {
     use super::*;
 
     #[test]
-    fn num_val_extracts_number() {
-        assert_eq!(expval_to_num(&num_val(42)).unwrap(), 42);
+    fn num_constructor_extracts_number() {
+        assert_eq!(ExpVal::num(42).as_num().unwrap(), 42);
     }
 
     #[test]
-    fn bool_val_extracts_boolean() {
-        assert!(expval_to_bool(&bool_val(true)).unwrap());
+    fn boolean_constructor_extracts_boolean() {
+        assert!(ExpVal::boolean(true).as_bool().unwrap());
     }
 
     #[test]
     fn wrong_extractor_reports_actual_value() {
         assert_eq!(
-            expval_to_num(&bool_val(false)).unwrap_err(),
+            ExpVal::boolean(false).as_num().unwrap_err(),
             ExpValError::NumValExpected {
-                actual: bool_val(false)
+                actual: ExpVal::boolean(false)
             }
         );
     }

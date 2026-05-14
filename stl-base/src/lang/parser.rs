@@ -1,5 +1,5 @@
 use crate::lang::{
-    ast::{CondClause, Expr, LetBinding, Program},
+    ast::{CondClause, Expr, LetBinding, LetRecBinding, Program},
     scanner::{ScanError, Span, Token, TokenKind, scan},
 };
 
@@ -66,6 +66,7 @@ impl Parser {
             TokenKind::Or => self.parse_call(Expr::OrExp),
             TokenKind::Cond => self.parse_cond(token.span),
             TokenKind::Let => self.parse_let(),
+            TokenKind::LetRec => self.parse_letrec(),
             TokenKind::Fn => self.parse_fn(),
             found => Err(ParseError::UnexpectedToken {
                 expected: "expression",
@@ -146,6 +147,41 @@ impl Parser {
     }
 
     fn parse_fn(&mut self) -> Result<Expr, ParseError> {
+        let (params, body) = self.parse_fn_parts()?;
+
+        Ok(Expr::FnExp {
+            params,
+            body: Box::new(body),
+        })
+    }
+
+    fn parse_letrec(&mut self) -> Result<Expr, ParseError> {
+        self.expect_lparen()?;
+
+        let mut bindings = Vec::new();
+
+        while !self.check_rparen() {
+            if self.is_at_end() {
+                return Err(ParseError::UnexpectedEnd { expected: "`)`" });
+            }
+
+            let name = self.expect_ident()?;
+            self.expect_equals()?;
+            self.expect_fn()?;
+            let (params, body) = self.parse_fn_parts()?;
+            bindings.push(LetRecBinding::new(name, params, body));
+        }
+
+        self.expect_rparen()?;
+        let body = self.parse_expr()?;
+
+        Ok(Expr::LetRecExp {
+            bindings,
+            body: Box::new(body),
+        })
+    }
+
+    fn parse_fn_parts(&mut self) -> Result<(Vec<String>, Expr), ParseError> {
         self.expect_lparen()?;
 
         let mut params = Vec::new();
@@ -161,10 +197,7 @@ impl Parser {
         self.expect_rparen()?;
         let body = self.parse_expr()?;
 
-        Ok(Expr::FnExp {
-            params,
-            body: Box::new(body),
-        })
+        Ok((params, body))
     }
 
     fn parse_args(&mut self) -> Result<Vec<Expr>, ParseError> {
@@ -230,6 +263,19 @@ impl Parser {
             TokenKind::Equals => Ok(()),
             found => Err(ParseError::UnexpectedToken {
                 expected: "`=`",
+                found,
+                span: token.span,
+            }),
+        }
+    }
+
+    fn expect_fn(&mut self) -> Result<(), ParseError> {
+        let token = self.advance("`fn`")?;
+
+        match token.kind {
+            TokenKind::Fn => Ok(()),
+            found => Err(ParseError::UnexpectedToken {
+                expected: "`fn`",
                 found,
                 span: token.span,
             }),
@@ -405,6 +451,30 @@ mod test {
     }
 
     #[test]
+    fn parse_letrec_expression() {
+        assert_eq!(
+            parse(
+                "letrec (
+                    f = fn(x) +(x 1)
+                    g = fn(y) f(y)
+                ) g(41)"
+            )
+            .unwrap(),
+            Program::new(Expr::LetRecExp {
+                bindings: vec![
+                    LetRecBinding::new(
+                        "f",
+                        vec!["x".to_string()],
+                        call(var("+"), vec![var("x"), Expr::ConstExp(1)])
+                    ),
+                    LetRecBinding::new("g", vec!["y".to_string()], call(var("f"), vec![var("y")]))
+                ],
+                body: Box::new(call(var("g"), vec![Expr::ConstExp(41)]))
+            })
+        );
+    }
+
+    #[test]
     fn parse_rejects_extra_input() {
         assert_eq!(
             parse("true false").unwrap_err(),
@@ -456,6 +526,18 @@ mod test {
                 expected: "`=`",
                 found: TokenKind::Int(1),
                 span: 7..8
+            }
+        );
+    }
+
+    #[test]
+    fn parse_rejects_letrec_binding_without_fn() {
+        assert_eq!(
+            parse("letrec (x = 1) x").unwrap_err(),
+            ParseError::UnexpectedToken {
+                expected: "`fn`",
+                found: TokenKind::Int(1),
+                span: 12..13
             }
         );
     }
