@@ -2,5 +2,6 @@ mod lang;
 mod repl;
 
 fn main() -> miette::Result<()> {
-    repl::run()
+    let mut repl = repl::Repl::new();
+    repl.run()
 }
