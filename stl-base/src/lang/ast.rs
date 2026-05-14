@@ -13,11 +13,21 @@ impl Program {
 pub enum Expr {
     ConstExp(i64),
     BoolExp(bool),
-    AddExp(Vec<Expr>),
-    SubExp(Vec<Expr>),
+    VarExp(String),
+    FnExp {
+        params: Vec<String>,
+        body: Box<Expr>,
+    },
+    CallExp {
+        operator: Box<Expr>,
+        operands: Vec<Expr>,
+    },
     OrExp(Vec<Expr>),
-    NotExp(Box<Expr>),
     CondExp(Vec<CondClause>),
+    LetExp {
+        bindings: Vec<LetBinding>,
+        body: Box<Expr>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,5 +39,20 @@ pub struct CondClause {
 impl CondClause {
     pub fn new(condition: Expr, result: Expr) -> Self {
         Self { condition, result }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LetBinding {
+    pub var: String,
+    pub expr: Expr,
+}
+
+impl LetBinding {
+    pub fn new(var: impl Into<String>, expr: Expr) -> Self {
+        Self {
+            var: var.into(),
+            expr,
+        }
     }
 }

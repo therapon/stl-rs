@@ -1,9 +1,30 @@
 use std::fmt::Display;
+use std::rc::Rc;
+
+use crate::lang::{ast::Expr, envs::Env};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExpVal {
     NumVal(i64),
     BoolVal(bool),
+    ProcVal(ProcVal),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcVal {
+    UserDefined {
+        params: Vec<String>,
+        body: Expr,
+        saved_env: Rc<Env>,
+    },
+    Primitive(PrimitiveProc),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrimitiveProc {
+    Add,
+    Sub,
+    Not,
 }
 
 impl Display for ExpVal {
@@ -11,6 +32,7 @@ impl Display for ExpVal {
         match self {
             ExpVal::NumVal(n) => write!(f, "{n}"),
             ExpVal::BoolVal(b) => write!(f, "{b}"),
+            ExpVal::ProcVal(_) => write!(f, "<procedure>"),
         }
     }
 }
@@ -22,6 +44,9 @@ pub enum ExpValError {
 
     #[error("expected boolean, found {actual}")]
     BoolValExpected { actual: ExpVal },
+
+    #[error("expected procedure, found {actual}")]
+    ProcValExpected { actual: ExpVal },
 }
 
 pub fn num_val(n: i64) -> ExpVal {
@@ -32,10 +57,14 @@ pub fn bool_val(b: bool) -> ExpVal {
     ExpVal::BoolVal(b)
 }
 
+pub fn proc_val(proc: ProcVal) -> ExpVal {
+    ExpVal::ProcVal(proc)
+}
+
 pub fn expval_to_num(val: &ExpVal) -> Result<i64, ExpValError> {
     match val {
         ExpVal::NumVal(n) => Ok(*n),
-        ExpVal::BoolVal(_) => Err(ExpValError::NumValExpected {
+        _ => Err(ExpValError::NumValExpected {
             actual: val.clone(),
         }),
     }
@@ -43,10 +72,19 @@ pub fn expval_to_num(val: &ExpVal) -> Result<i64, ExpValError> {
 
 pub fn expval_to_bool(val: &ExpVal) -> Result<bool, ExpValError> {
     match val {
-        ExpVal::NumVal(_) => Err(ExpValError::BoolValExpected {
+        ExpVal::BoolVal(b) => Ok(*b),
+        _ => Err(ExpValError::BoolValExpected {
             actual: val.clone(),
         }),
-        ExpVal::BoolVal(b) => Ok(*b),
+    }
+}
+
+pub fn expval_to_proc(val: &ExpVal) -> Result<ProcVal, ExpValError> {
+    match val {
+        ExpVal::ProcVal(proc) => Ok(proc.clone()),
+        _ => Err(ExpValError::ProcValExpected {
+            actual: val.clone(),
+        }),
     }
 }
 

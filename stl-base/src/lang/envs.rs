@@ -20,28 +20,30 @@ pub enum EnvError {
     UnboundVariable { var: Symbol },
 }
 
-pub fn empty_env() -> Rc<Env> {
-    Rc::new(Env::EmptyEnv)
-}
+impl Env {
+    pub fn empty() -> Rc<Self> {
+        Rc::new(Self::EmptyEnv)
+    }
 
-pub fn extend_env(var: impl Into<Symbol>, val: ExpVal, outer: Rc<Env>) -> Rc<Env> {
-    Rc::new(Env::ExtendEnv {
-        var: var.into(),
-        val,
-        outer,
-    })
-}
+    pub fn extend(self: Rc<Self>, var: impl Into<Symbol>, val: ExpVal) -> Rc<Self> {
+        Rc::new(Self::ExtendEnv {
+            var: var.into(),
+            val,
+            outer: self,
+        })
+    }
 
-pub fn apply_env(env: &Env, search_var: &str) -> Result<ExpVal, EnvError> {
-    match env {
-        Env::EmptyEnv => Err(EnvError::UnboundVariable {
-            var: search_var.to_string(),
-        }),
-        Env::ExtendEnv { var, val, outer } => {
-            if search_var == var {
-                Ok(val.clone())
-            } else {
-                apply_env(outer, search_var)
+    pub fn apply(&self, search_var: &str) -> Result<ExpVal, EnvError> {
+        match self {
+            Self::EmptyEnv => Err(EnvError::UnboundVariable {
+                var: search_var.to_string(),
+            }),
+            Self::ExtendEnv { var, val, outer } => {
+                if search_var == var {
+                    Ok(val.clone())
+                } else {
+                    outer.apply(search_var)
+                }
             }
         }
     }
@@ -55,7 +57,7 @@ mod test {
     #[test]
     fn empty_env_has_no_bindings() {
         assert_eq!(
-            apply_env(&empty_env(), "x").unwrap_err(),
+            Env::empty().apply("x").unwrap_err(),
             EnvError::UnboundVariable {
                 var: "x".to_string()
             }
@@ -64,20 +66,20 @@ mod test {
 
     #[test]
     fn apply_env_finds_nearest_binding() {
-        let env = empty_env();
-        let env = extend_env("x", num_val(10), env);
-        let env = extend_env("x", bool_val(true), env);
+        let env = Env::empty()
+            .extend("x", num_val(10))
+            .extend("x", bool_val(true));
 
-        assert_eq!(apply_env(&env, "x").unwrap(), bool_val(true));
+        assert_eq!(env.apply("x").unwrap(), bool_val(true));
     }
 
     #[test]
     fn apply_env_searches_saved_environment() {
-        let env = empty_env();
-        let env = extend_env("x", num_val(10), env);
-        let env = extend_env("y", bool_val(false), env);
+        let env = Env::empty()
+            .extend("x", num_val(10))
+            .extend("y", bool_val(false));
 
-        assert_eq!(apply_env(&env, "x").unwrap(), num_val(10));
-        assert_eq!(apply_env(&env, "y").unwrap(), bool_val(false));
+        assert_eq!(env.apply("x").unwrap(), num_val(10));
+        assert_eq!(env.apply("y").unwrap(), bool_val(false));
     }
 }

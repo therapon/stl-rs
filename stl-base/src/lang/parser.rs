@@ -1,5 +1,5 @@
 use crate::lang::{
-    ast::{CondClause, Expr, Program},
+    ast::{CondClause, Expr, LetBinding, Program},
     scanner::{ScanError, Span, Token, TokenKind, scan},
 };
 
@@ -15,14 +15,6 @@ pub enum ParseError {
     UnexpectedToken {
         expected: &'static str,
         found: TokenKind,
-        span: Span,
-    },
-
-    #[error("{op} expects {expected} argument(s), found {actual} at {span:?}")]
-    WrongArity {
-        op: &'static str,
-        expected: usize,
-        actual: usize,
         span: Span,
     },
 
@@ -67,11 +59,14 @@ impl Parser {
             TokenKind::Int(n) => Ok(Expr::ConstExp(n)),
             TokenKind::True => Ok(Expr::BoolExp(true)),
             TokenKind::False => Ok(Expr::BoolExp(false)),
-            TokenKind::Plus => self.parse_call(Expr::AddExp),
-            TokenKind::Minus => self.parse_call(Expr::SubExp),
+            TokenKind::Ident(var) => self.parse_var_or_call(var),
+            TokenKind::Plus => self.parse_var_or_call("+"),
+            TokenKind::Minus => self.parse_var_or_call("-"),
+            TokenKind::Not => self.parse_var_or_call("not"),
             TokenKind::Or => self.parse_call(Expr::OrExp),
-            TokenKind::Not => self.parse_not(token.span),
             TokenKind::Cond => self.parse_cond(token.span),
+            TokenKind::Let => self.parse_let(),
+            TokenKind::Fn => self.parse_fn(),
             found => Err(ParseError::UnexpectedToken {
                 expected: "expression",
                 found,
@@ -80,24 +75,24 @@ impl Parser {
         }
     }
 
+    fn parse_var_or_call(&mut self, var: impl Into<String>) -> Result<Expr, ParseError> {
+        let operator = Expr::VarExp(var.into());
+
+        if self.check_lparen() {
+            let operands = self.parse_args()?;
+
+            Ok(Expr::CallExp {
+                operator: Box::new(operator),
+                operands,
+            })
+        } else {
+            Ok(operator)
+        }
+    }
+
     fn parse_call(&mut self, build: impl FnOnce(Vec<Expr>) -> Expr) -> Result<Expr, ParseError> {
         let args = self.parse_args()?;
         Ok(build(args))
-    }
-
-    fn parse_not(&mut self, op_span: Span) -> Result<Expr, ParseError> {
-        let args = self.parse_args()?;
-
-        if args.len() != 1 {
-            return Err(ParseError::WrongArity {
-                op: "not",
-                expected: 1,
-                actual: args.len(),
-                span: op_span,
-            });
-        }
-
-        Ok(Expr::NotExp(Box::new(args.into_iter().next().unwrap())))
     }
 
     fn parse_cond(&mut self, cond_span: Span) -> Result<Expr, ParseError> {
@@ -123,6 +118,53 @@ impl Parser {
         }
 
         Ok(Expr::CondExp(clauses))
+    }
+
+    fn parse_let(&mut self) -> Result<Expr, ParseError> {
+        self.expect_lparen()?;
+
+        let mut bindings = Vec::new();
+
+        while !self.check_rparen() {
+            if self.is_at_end() {
+                return Err(ParseError::UnexpectedEnd { expected: "`)`" });
+            }
+
+            let var = self.expect_ident()?;
+            self.expect_equals()?;
+            let expr = self.parse_expr()?;
+            bindings.push(LetBinding::new(var, expr));
+        }
+
+        self.expect_rparen()?;
+        let body = self.parse_expr()?;
+
+        Ok(Expr::LetExp {
+            bindings,
+            body: Box::new(body),
+        })
+    }
+
+    fn parse_fn(&mut self) -> Result<Expr, ParseError> {
+        self.expect_lparen()?;
+
+        let mut params = Vec::new();
+
+        while !self.check_rparen() {
+            if self.is_at_end() {
+                return Err(ParseError::UnexpectedEnd { expected: "`)`" });
+            }
+
+            params.push(self.expect_ident()?);
+        }
+
+        self.expect_rparen()?;
+        let body = self.parse_expr()?;
+
+        Ok(Expr::FnExp {
+            params,
+            body: Box::new(body),
+        })
     }
 
     fn parse_args(&mut self) -> Result<Vec<Expr>, ParseError> {
@@ -168,6 +210,32 @@ impl Parser {
         }
     }
 
+    fn expect_ident(&mut self) -> Result<String, ParseError> {
+        let token = self.advance("identifier")?;
+
+        match token.kind {
+            TokenKind::Ident(var) => Ok(var),
+            found => Err(ParseError::UnexpectedToken {
+                expected: "identifier",
+                found,
+                span: token.span,
+            }),
+        }
+    }
+
+    fn expect_equals(&mut self) -> Result<(), ParseError> {
+        let token = self.advance("`=`")?;
+
+        match token.kind {
+            TokenKind::Equals => Ok(()),
+            found => Err(ParseError::UnexpectedToken {
+                expected: "`=`",
+                found,
+                span: token.span,
+            }),
+        }
+    }
+
     fn expect_arrow(&mut self) -> Result<(), ParseError> {
         let token = self.advance("`=>`")?;
 
@@ -186,6 +254,16 @@ impl Parser {
             self.peek(),
             Some(Token {
                 kind: TokenKind::RParen,
+                ..
+            })
+        )
+    }
+
+    fn check_lparen(&self) -> bool {
+        matches!(
+            self.peek(),
+            Some(Token {
+                kind: TokenKind::LParen,
                 ..
             })
         )
@@ -215,11 +293,22 @@ impl Parser {
 mod test {
     use super::*;
 
+    fn call(operator: Expr, operands: Vec<Expr>) -> Expr {
+        Expr::CallExp {
+            operator: Box::new(operator),
+            operands,
+        }
+    }
+
+    fn var(name: &str) -> Expr {
+        Expr::VarExp(name.to_string())
+    }
+
     #[test]
     fn parse_integer_addition() {
         assert_eq!(
             parse("+(1 2)").unwrap(),
-            Program::new(Expr::AddExp(vec![Expr::ConstExp(1), Expr::ConstExp(2)]))
+            Program::new(call(var("+"), vec![Expr::ConstExp(1), Expr::ConstExp(2)]))
         );
     }
 
@@ -227,10 +316,13 @@ mod test {
     fn parse_nested_integer_expression() {
         assert_eq!(
             parse("+(1 -(4 2))").unwrap(),
-            Program::new(Expr::AddExp(vec![
-                Expr::ConstExp(1),
-                Expr::SubExp(vec![Expr::ConstExp(4), Expr::ConstExp(2)])
-            ]))
+            Program::new(call(
+                var("+"),
+                vec![
+                    Expr::ConstExp(1),
+                    call(var("-"), vec![Expr::ConstExp(4), Expr::ConstExp(2)])
+                ]
+            ))
         );
     }
 
@@ -240,7 +332,7 @@ mod test {
             parse("or(true not(false))").unwrap(),
             Program::new(Expr::OrExp(vec![
                 Expr::BoolExp(true),
-                Expr::NotExp(Box::new(Expr::BoolExp(false)))
+                call(var("not"), vec![Expr::BoolExp(false)])
             ]))
         );
     }
@@ -259,9 +351,56 @@ mod test {
                 CondClause::new(Expr::BoolExp(false), Expr::ConstExp(1)),
                 CondClause::new(
                     Expr::BoolExp(true),
-                    Expr::AddExp(vec![Expr::ConstExp(2), Expr::ConstExp(3)])
+                    call(var("+"), vec![Expr::ConstExp(2), Expr::ConstExp(3)])
                 )
             ]))
+        );
+    }
+
+    #[test]
+    fn parse_variable_reference() {
+        assert_eq!(parse("x").unwrap(), Program::new(var("x")));
+    }
+
+    #[test]
+    fn parse_function_expression() {
+        assert_eq!(
+            parse("fn(x y) +(x y)").unwrap(),
+            Program::new(Expr::FnExp {
+                params: vec!["x".to_string(), "y".to_string()],
+                body: Box::new(call(var("+"), vec![var("x"), var("y")]))
+            })
+        );
+    }
+
+    #[test]
+    fn parse_function_call() {
+        assert_eq!(
+            parse("f(1 2)").unwrap(),
+            Program::new(call(var("f"), vec![Expr::ConstExp(1), Expr::ConstExp(2)]))
+        );
+    }
+
+    #[test]
+    fn parse_let_expression() {
+        assert_eq!(
+            parse(
+                "let (
+                    x = 1
+                    y = +(2 3)
+                ) +(x y)"
+            )
+            .unwrap(),
+            Program::new(Expr::LetExp {
+                bindings: vec![
+                    LetBinding::new("x", Expr::ConstExp(1)),
+                    LetBinding::new(
+                        "y",
+                        call(var("+"), vec![Expr::ConstExp(2), Expr::ConstExp(3)])
+                    )
+                ],
+                body: Box::new(call(var("+"), vec![var("x"), var("y")]))
+            })
         );
     }
 
@@ -282,22 +421,9 @@ mod test {
         assert_eq!(
             parse("+ 1 2").unwrap_err(),
             ParseError::UnexpectedToken {
-                expected: "`(`",
+                expected: "end of input",
                 found: TokenKind::Int(1),
                 span: 2..3
-            }
-        );
-    }
-
-    #[test]
-    fn parse_rejects_wrong_not_arity() {
-        assert_eq!(
-            parse("not(true false)").unwrap_err(),
-            ParseError::WrongArity {
-                op: "not",
-                expected: 1,
-                actual: 2,
-                span: 0..3
             }
         );
     }
@@ -319,6 +445,18 @@ mod test {
         assert_eq!(
             parse("cond ()").unwrap_err(),
             ParseError::EmptyCond { span: 0..4 }
+        );
+    }
+
+    #[test]
+    fn parse_rejects_let_binding_without_equals() {
+        assert_eq!(
+            parse("let (x 1) x").unwrap_err(),
+            ParseError::UnexpectedToken {
+                expected: "`=`",
+                found: TokenKind::Int(1),
+                span: 7..8
+            }
         );
     }
 }

@@ -22,6 +22,15 @@ pub enum TokenKind {
     #[token("=>")]
     Arrow,
 
+    #[token("=")]
+    Equals,
+
+    #[token("let")]
+    Let,
+
+    #[token("fn")]
+    Fn,
+
     #[token("cond")]
     Cond,
 
@@ -153,6 +162,96 @@ mod test {
                 Token {
                     kind: TokenKind::RParen,
                     span: 15..16
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_let_tokens() {
+        let tokens = scan("let (x = 1) x").unwrap();
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token {
+                    kind: TokenKind::Let,
+                    span: 0..3
+                },
+                Token {
+                    kind: TokenKind::LParen,
+                    span: 4..5
+                },
+                Token {
+                    kind: TokenKind::Ident("x".to_string()),
+                    span: 5..6
+                },
+                Token {
+                    kind: TokenKind::Equals,
+                    span: 7..8
+                },
+                Token {
+                    kind: TokenKind::Int(1),
+                    span: 9..10
+                },
+                Token {
+                    kind: TokenKind::RParen,
+                    span: 10..11
+                },
+                Token {
+                    kind: TokenKind::Ident("x".to_string()),
+                    span: 12..13
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_fn_tokens() {
+        let tokens = scan("fn(x y) +(x y)").unwrap();
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token {
+                    kind: TokenKind::Fn,
+                    span: 0..2
+                },
+                Token {
+                    kind: TokenKind::LParen,
+                    span: 2..3
+                },
+                Token {
+                    kind: TokenKind::Ident("x".to_string()),
+                    span: 3..4
+                },
+                Token {
+                    kind: TokenKind::Ident("y".to_string()),
+                    span: 5..6
+                },
+                Token {
+                    kind: TokenKind::RParen,
+                    span: 6..7
+                },
+                Token {
+                    kind: TokenKind::Plus,
+                    span: 8..9
+                },
+                Token {
+                    kind: TokenKind::LParen,
+                    span: 9..10
+                },
+                Token {
+                    kind: TokenKind::Ident("x".to_string()),
+                    span: 10..11
+                },
+                Token {
+                    kind: TokenKind::Ident("y".to_string()),
+                    span: 12..13
+                },
+                Token {
+                    kind: TokenKind::RParen,
+                    span: 13..14
                 },
             ]
         );
