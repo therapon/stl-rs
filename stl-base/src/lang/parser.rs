@@ -27,6 +27,11 @@ pub fn parse(input: &str) -> Result<Program, ParseError> {
     Parser::new(tokens).parse_program()
 }
 
+pub fn parse_programs(input: &str) -> Result<Vec<Program>, ParseError> {
+    let tokens = scan(input)?;
+    Parser::new(tokens).parse_programs()
+}
+
 #[derive(Clone, Debug)]
 pub struct Parser {
     tokens: Vec<Token>,
@@ -50,6 +55,16 @@ impl Parser {
         }
 
         Ok(Program::new(body))
+    }
+
+    pub fn parse_programs(mut self) -> Result<Vec<Program>, ParseError> {
+        let mut programs = Vec::new();
+
+        while !self.is_at_end() {
+            programs.push(Program::new(self.parse_expr()?));
+        }
+
+        Ok(programs)
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
@@ -370,6 +385,23 @@ mod test {
                     call(var("-"), vec![Expr::ConstExp(4), Expr::ConstExp(2)])
                 ]
             ))
+        );
+    }
+
+    #[test]
+    fn parse_multiple_top_level_programs() {
+        assert_eq!(
+            parse_programs(
+                "+(1 2)
+                =(1 1)
+                true"
+            )
+            .unwrap(),
+            vec![
+                Program::new(call(var("+"), vec![Expr::ConstExp(1), Expr::ConstExp(2)])),
+                Program::new(call(var("="), vec![Expr::ConstExp(1), Expr::ConstExp(1)])),
+                Program::new(Expr::BoolExp(true))
+            ]
         );
     }
 

@@ -1,0 +1,8 @@
+letrec( 
+	fib = fn(x) cond(
+		=(x 0) => 1
+		=(x 1) => 1
+		=(x 2) => 1
+		true   => +(fib(-(x 1))
+  		            fib(-(x 2))))
+) fib(6)
