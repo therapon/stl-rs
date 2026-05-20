@@ -6,6 +6,7 @@ pub type Span = Range<usize>;
 
 #[derive(Logos, Clone, Debug, PartialEq, Eq)]
 #[logos(skip r"[ \t\r\n\f]+")]
+#[logos(skip(r";[^\r\n]*", allow_greedy = true))]
 pub enum TokenKind {
     #[token("(")]
     LParen,
@@ -101,6 +102,37 @@ mod test {
                 Token {
                     kind: TokenKind::RParen,
                     span: 7..8
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_skips_line_comments() {
+        let tokens = scan("; comment\n+(1 ; right operand follows\n 2)").unwrap();
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token {
+                    kind: TokenKind::Ident("+".to_string()),
+                    span: 10..11
+                },
+                Token {
+                    kind: TokenKind::LParen,
+                    span: 11..12
+                },
+                Token {
+                    kind: TokenKind::Int(1),
+                    span: 12..13
+                },
+                Token {
+                    kind: TokenKind::Int(2),
+                    span: 39..40
+                },
+                Token {
+                    kind: TokenKind::RParen,
+                    span: 40..41
                 },
             ]
         );
