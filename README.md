@@ -3,6 +3,8 @@ EOPL inspired languages in Rust.
 
 ## Base language 
 
+Line comments use `;`, I typically use 2 in a sequence, i.e., `;; this is a comment`
+
 ### Values 
 
 * Ints 
@@ -23,6 +25,7 @@ EOPL inspired languages in Rust.
 * `letrec` expressions for recursive bindings: `letrec (f = fn(x) ..f(...)... ) f(10)`
 * Conditional expression: `cond ( test => result ...)`
     * use `true => e` for default or else-branch
+    
 
 ### Identifiers 
 
