@@ -1,7 +1,4 @@
-mod lang;
-mod repl;
-
 fn main() -> miette::Result<()> {
-    let mut repl = repl::Repl::new();
+    let mut repl = stl_base::repl::Repl::new();
     repl.run()
 }

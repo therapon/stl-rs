@@ -75,10 +75,7 @@ impl Parser {
             TokenKind::True => Ok(Expr::BoolExp(true)),
             TokenKind::False => Ok(Expr::BoolExp(false)),
             TokenKind::Ident(var) => self.parse_var_or_call(var),
-            TokenKind::Plus => self.parse_var_or_call("+"),
-            TokenKind::Minus => self.parse_var_or_call("-"),
             TokenKind::Equals => self.parse_var_or_call("="),
-            TokenKind::Not => self.parse_var_or_call("not"),
             TokenKind::Or => self.parse_call(Expr::OrExp),
             TokenKind::Cond => self.parse_cond(token.span),
             TokenKind::Let => self.parse_let(),
@@ -264,6 +261,7 @@ impl Parser {
 
         match token.kind {
             TokenKind::Ident(var) => Ok(var),
+            TokenKind::Equals => Ok("=".to_string()),
             found => Err(ParseError::UnexpectedToken {
                 expected: "identifier",
                 found,
@@ -465,6 +463,37 @@ mod test {
         assert_eq!(
             parse("f(1 2)").unwrap(),
             Program::new(call(var("f"), vec![Expr::ConstExp(1), Expr::ConstExp(2)]))
+        );
+    }
+
+    #[test]
+    fn parse_scheme_like_function_call() {
+        assert_eq!(
+            parse("check-eq?(+(1 2) 3)").unwrap(),
+            Program::new(call(
+                var("check-eq?"),
+                vec![
+                    call(var("+"), vec![Expr::ConstExp(1), Expr::ConstExp(2)]),
+                    Expr::ConstExp(3)
+                ]
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_symbolic_binding_names() {
+        assert_eq!(
+            parse("let (= = fn(x y) x) =(1 2)").unwrap(),
+            Program::new(Expr::LetExp {
+                bindings: vec![LetBinding::new(
+                    "=",
+                    Expr::FnExp {
+                        params: vec!["x".to_string(), "y".to_string()],
+                        body: Box::new(var("x"))
+                    }
+                )],
+                body: Box::new(call(var("="), vec![Expr::ConstExp(1), Expr::ConstExp(2)]))
+            })
         );
     }
 

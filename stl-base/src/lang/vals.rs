@@ -7,21 +7,21 @@ use crate::lang::{ast::Expr, envs::Env};
 pub enum ExpVal {
     NumVal(i64),
     BoolVal(bool),
-    ProcVal(ProcVal),
+    ProcVal(Procedure),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProcVal {
-    UserDefined {
+pub enum Procedure {
+    Closure {
         params: Vec<String>,
         body: Expr,
         saved_env: Rc<Env>,
     },
-    Primitive(PrimitiveProc),
+    Builtin(PrimOp),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PrimitiveProc {
+pub enum PrimOp {
     Add,
     Sub,
     Eq,
@@ -41,13 +41,13 @@ impl Display for ExpVal {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ExpValError {
     #[error("expected number, found {actual}")]
-    NumValExpected { actual: ExpVal },
+    NumValExpected { actual: Box<ExpVal> },
 
     #[error("expected boolean, found {actual}")]
-    BoolValExpected { actual: ExpVal },
+    BoolValExpected { actual: Box<ExpVal> },
 
     #[error("expected procedure, found {actual}")]
-    ProcValExpected { actual: ExpVal },
+    ProcValExpected { actual: Box<ExpVal> },
 }
 
 impl ExpVal {
@@ -59,7 +59,7 @@ impl ExpVal {
         Self::BoolVal(b)
     }
 
-    pub fn proc(proc: ProcVal) -> Self {
+    pub fn proc(proc: Procedure) -> Self {
         Self::ProcVal(proc)
     }
 
@@ -67,7 +67,7 @@ impl ExpVal {
         match self {
             Self::NumVal(n) => Ok(*n),
             _ => Err(ExpValError::NumValExpected {
-                actual: self.clone(),
+                actual: Box::new(self.clone()),
             }),
         }
     }
@@ -76,16 +76,16 @@ impl ExpVal {
         match self {
             Self::BoolVal(b) => Ok(*b),
             _ => Err(ExpValError::BoolValExpected {
-                actual: self.clone(),
+                actual: Box::new(self.clone()),
             }),
         }
     }
 
-    pub fn as_proc(&self) -> Result<ProcVal, ExpValError> {
+    pub fn as_proc(&self) -> Result<Procedure, ExpValError> {
         match self {
             Self::ProcVal(proc) => Ok(proc.clone()),
             _ => Err(ExpValError::ProcValExpected {
-                actual: self.clone(),
+                actual: Box::new(self.clone()),
             }),
         }
     }
@@ -110,7 +110,7 @@ mod test {
         assert_eq!(
             ExpVal::boolean(false).as_num().unwrap_err(),
             ExpValError::NumValExpected {
-                actual: ExpVal::boolean(false)
+                actual: Box::new(ExpVal::boolean(false))
             }
         );
     }

@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::lang::{
     ast::LetRecBinding,
-    vals::{ExpVal, ProcVal},
+    vals::{ExpVal, Procedure},
 };
 
 pub type Symbol = String;
@@ -61,7 +61,7 @@ impl Env {
             }
             Self::ExtendRecEnv { bindings, outer } => {
                 if let Some(binding) = bindings.iter().find(|binding| binding.name == search_var) {
-                    Ok(ExpVal::proc(ProcVal::UserDefined {
+                    Ok(ExpVal::proc(Procedure::Closure {
                         params: binding.params.clone(),
                         body: binding.body.clone(),
                         saved_env: Rc::new(self.clone()),
@@ -117,7 +117,7 @@ mod test {
 
         assert!(matches!(
             env.apply("f").unwrap(),
-            ExpVal::ProcVal(ProcVal::UserDefined { .. })
+            ExpVal::ProcVal(Procedure::Closure { .. })
         ));
     }
 }

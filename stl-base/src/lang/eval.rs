@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::lang::{
     ast::{CondClause, Expr, LetBinding, LetRecBinding, Program},
     envs::{Env, EnvError},
-    vals::{ExpVal, ExpValError, PrimitiveProc, ProcVal},
+    vals::{ExpVal, ExpValError, PrimOp, Procedure},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -25,7 +25,10 @@ pub enum EvalError {
     },
 
     #[error("cannot compare {left} and {right} with =")]
-    EqualityNotSupported { left: ExpVal, right: ExpVal },
+    EqualityNotSupported {
+        left: Box<ExpVal>,
+        right: Box<ExpVal>,
+    },
 
     #[error("no cond clause matched")]
     NoCondClauseMatched,
@@ -61,10 +64,10 @@ impl Evaluator {
 
     fn initial_env() -> Rc<Env> {
         Env::empty()
-            .extend("+", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Add)))
-            .extend("-", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Sub)))
-            .extend("=", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Eq)))
-            .extend("not", ExpVal::proc(ProcVal::Primitive(PrimitiveProc::Not)))
+            .extend("+", ExpVal::proc(Procedure::Builtin(PrimOp::Add)))
+            .extend("-", ExpVal::proc(Procedure::Builtin(PrimOp::Sub)))
+            .extend("=", ExpVal::proc(Procedure::Builtin(PrimOp::Eq)))
+            .extend("not", ExpVal::proc(Procedure::Builtin(PrimOp::Not)))
     }
 
     fn eval_expr_in_env(&self, expr: &Expr, env: Rc<Env>) -> Result<ExpVal, EvalError> {
@@ -72,7 +75,7 @@ impl Evaluator {
             Expr::ConstExp(n) => Ok(ExpVal::num(*n)),
             Expr::BoolExp(b) => Ok(ExpVal::boolean(*b)),
             Expr::VarExp(var) => Ok(env.apply(var)?),
-            Expr::FnExp { params, body } => Ok(ExpVal::proc(ProcVal::UserDefined {
+            Expr::FnExp { params, body } => Ok(ExpVal::proc(Procedure::Closure {
                 params: params.clone(),
                 body: *body.clone(),
                 saved_env: env,
@@ -100,9 +103,9 @@ impl Evaluator {
         self.apply_procedure(&proc, args)
     }
 
-    fn apply_procedure(&self, proc: &ProcVal, args: Vec<ExpVal>) -> Result<ExpVal, EvalError> {
+    fn apply_procedure(&self, proc: &Procedure, args: Vec<ExpVal>) -> Result<ExpVal, EvalError> {
         match proc {
-            ProcVal::UserDefined {
+            Procedure::Closure {
                 params,
                 body,
                 saved_env,
@@ -123,20 +126,16 @@ impl Evaluator {
 
                 self.eval_expr_in_env(body, call_env)
             }
-            ProcVal::Primitive(primitive) => self.apply_primitive(primitive, &args),
+            Procedure::Builtin(prim_op) => self.apply_primitive(prim_op, &args),
         }
     }
 
-    fn apply_primitive(
-        &self,
-        primitive: &PrimitiveProc,
-        args: &[ExpVal],
-    ) -> Result<ExpVal, EvalError> {
-        match primitive {
-            PrimitiveProc::Add => self.eval_add(args),
-            PrimitiveProc::Sub => self.eval_sub(args),
-            PrimitiveProc::Eq => self.eval_eq(args),
-            PrimitiveProc::Not => self.eval_not(args),
+    fn apply_primitive(&self, prim_op: &PrimOp, args: &[ExpVal]) -> Result<ExpVal, EvalError> {
+        match prim_op {
+            PrimOp::Add => self.eval_add(args),
+            PrimOp::Sub => self.eval_sub(args),
+            PrimOp::Eq => self.eval_eq(args),
+            PrimOp::Not => self.eval_not(args),
         }
     }
 
@@ -181,8 +180,8 @@ impl Evaluator {
             (ExpVal::NumVal(left), ExpVal::NumVal(right)) => Ok(ExpVal::boolean(left == right)),
             (ExpVal::BoolVal(left), ExpVal::BoolVal(right)) => Ok(ExpVal::boolean(left == right)),
             (left, right) => Err(EvalError::EqualityNotSupported {
-                left: left.clone(),
-                right: right.clone(),
+                left: Box::new(left.clone()),
+                right: Box::new(right.clone()),
             }),
         }
     }
@@ -339,8 +338,8 @@ mod test {
         assert_eq!(
             eval("=(1 true)").unwrap_err(),
             EvalError::EqualityNotSupported {
-                left: ExpVal::num(1),
-                right: ExpVal::boolean(true)
+                left: Box::new(ExpVal::num(1)),
+                right: Box::new(ExpVal::boolean(true))
             }
         );
     }
@@ -388,7 +387,7 @@ mod test {
         assert_eq!(
             eval("let (x = 1) x(2)").unwrap_err(),
             EvalError::ExpVal(ExpValError::ProcValExpected {
-                actual: ExpVal::num(1)
+                actual: Box::new(ExpVal::num(1))
             })
         );
     }
@@ -502,7 +501,7 @@ mod test {
         assert_eq!(
             eval("+(1 true)").unwrap_err(),
             EvalError::ExpVal(ExpValError::NumValExpected {
-                actual: ExpVal::boolean(true)
+                actual: Box::new(ExpVal::boolean(true))
             })
         );
     }

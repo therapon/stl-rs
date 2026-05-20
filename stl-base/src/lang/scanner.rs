@@ -13,12 +13,6 @@ pub enum TokenKind {
     #[token(")")]
     RParen,
 
-    #[token("+")]
-    Plus,
-
-    #[token("-")]
-    Minus,
-
     #[token("=>")]
     Arrow,
 
@@ -40,9 +34,6 @@ pub enum TokenKind {
     #[token("or")]
     Or,
 
-    #[token("not")]
-    Not,
-
     #[token("true")]
     True,
 
@@ -52,7 +43,8 @@ pub enum TokenKind {
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().expect("integer regex should parse"))]
     Int(i64),
 
-    #[regex(r"[A-Za-z_][A-Za-z0-9_]*", |lex| lex.slice().to_string())]
+    #[regex(r"[A-Za-z!$%&*/:<>?^_~][A-Za-z0-9!$%&*/:<>?^_~+\-.@]*", |lex| lex.slice().to_string())]
+    #[regex(r"[!$%&*/:<=>?^_~+\-.@]+", |lex| lex.slice().to_string(), priority = 1)]
     Ident(String),
 }
 
@@ -91,7 +83,7 @@ mod test {
             tokens,
             vec![
                 Token {
-                    kind: TokenKind::Plus,
+                    kind: TokenKind::Ident("+".to_string()),
                     span: 1..2
                 },
                 Token {
@@ -132,6 +124,53 @@ mod test {
                 kind: TokenKind::Ident("orange".to_string()),
                 span: 0..6
             }]
+        );
+    }
+
+    #[test]
+    fn scan_scheme_like_identifiers() {
+        let tokens = scan("check-eq? zero? number->string + - <= >= * / not").unwrap();
+        let kinds = tokens
+            .into_iter()
+            .map(|token| token.kind)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Ident("check-eq?".to_string()),
+                TokenKind::Ident("zero?".to_string()),
+                TokenKind::Ident("number->string".to_string()),
+                TokenKind::Ident("+".to_string()),
+                TokenKind::Ident("-".to_string()),
+                TokenKind::Ident("<=".to_string()),
+                TokenKind::Ident(">=".to_string()),
+                TokenKind::Ident("*".to_string()),
+                TokenKind::Ident("/".to_string()),
+                TokenKind::Ident("not".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_keeps_equals_as_binding_separator() {
+        let tokens = scan("let (x=1) x").unwrap();
+        let kinds = tokens
+            .into_iter()
+            .map(|token| token.kind)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Let,
+                TokenKind::LParen,
+                TokenKind::Ident("x".to_string()),
+                TokenKind::Equals,
+                TokenKind::Int(1),
+                TokenKind::RParen,
+                TokenKind::Ident("x".to_string()),
+            ]
         );
     }
 
@@ -304,7 +343,7 @@ mod test {
                     span: 6..7
                 },
                 Token {
-                    kind: TokenKind::Plus,
+                    kind: TokenKind::Ident("+".to_string()),
                     span: 8..9
                 },
                 Token {
