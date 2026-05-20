@@ -38,3 +38,18 @@ Meta commands:
 * `:load <path>` loads a file (has some tab autocompletion)
 
 File with code can have 1 or multiple top level expressions.
+
+
+## Running 
+
+Uses `just` to run some convenient comamnds 
+
+```
+just --list
+Available recipes:
+   lint          # Run formatting and Clippy checks.
+   repl          # Start the STL REPL.
+   test          # Run all unit and integration tests with nextest.
+   test-language # Run language integration tests with nextest.
+   test-unit     # Run only Rust unit tests with nextest.
+```
